@@ -1,0 +1,8 @@
+streamlit
+pandas
+kafka-python
+plotly
+numpy
+streamlit-autorefresh
+pydeck
+altair

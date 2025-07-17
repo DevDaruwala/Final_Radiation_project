@@ -1,0 +1,196 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: wurstmeister/zookeeper
+    ports:
+      - "2181:2181"
+    networks:
+      - flink-net   
+
+  kafka:
+    image: wurstmeister/kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      - zookeeper
+    networks:
+      - flink-net   
+
+  producer:
+    build:
+      context: ./producer
+    container_name: kafka-producer-container
+    depends_on:
+      - kafka
+    networks:
+      - flink-net
+    volumes:
+      - ./producer:/app
+      - ./producer/Small_file.csv:/app/Small_file.csv
+    working_dir: /app
+    entrypoint: ["sh", "-c", "./wait-for-kafka.sh && python3 continent_producer.py"]
+
+
+  rolling-average-job:
+    build:
+      context: ./flink
+      #dockerfile: flink.Dockerfile
+    # image: my-flink-runtime:stable
+    container_name: rolling-average-job
+    depends_on:
+      - kafka
+    networks:
+      - flink-net
+    volumes:
+      - ./flink:/app
+    working_dir: /app
+    command: python3 flink/src/rolling_job.py
+    entrypoint: ["sh", "-c", "./wait-for-kafka.sh kafka:9092 && python3 src/rolling_avarage.py"]
+
+  aleart-job:
+    build:
+      context: ./flink
+      #dockerfile: flink.Dockerfile
+    # image: my-flink-runtime:stable
+    container_name: aleart-job
+    depends_on:
+      - kafka
+    networks:
+      - flink-net
+    volumes:
+      - ./flink:/app
+    working_dir: /app
+    command: python3 flink/src/alert_job.py
+    entrypoint: ["sh", "-c", "./wait-for-kafka.sh kafka:9092 && python3 src/alert_job.py"]
+  
+
+  clean-job:
+      build:
+        context: ./flink
+        #dockerfile: flink.Dockerfile
+      # image: my-flink-runtime:stable
+      container_name: clean-job
+      depends_on:
+        - kafka
+      networks:
+        - flink-net
+      #command: python3 flink/src/clean_job.py
+      volumes:
+       - ./flink/src:/app/src
+       - ./flink/wait-for-kafka.sh:/app/wait-for-kafka.sh
+      working_dir: /app
+      entrypoint: ["sh", "-c", "./wait-for-kafka.sh kafka:9092 && python3 src/clean_job.py"]
+
+  trend-job:
+      build:
+        context: ./flink
+        #dockerfile: flink.Dockerfile
+      # image: my-flink-runtime:stable
+      container_name: trend-job
+      depends_on:
+        - kafka
+      networks:
+        - flink-net
+      volumes:
+        - ./flink:/app
+      working_dir: /app
+      command: python3 flink/src/trend_job.py
+      entrypoint: ["sh", "-c", "./wait-for-kafka.sh kafka:9092 && python3 src/trend_job.py"]
+
+ # combine-python:
+  #  build:
+   #   context: ./frontend
+    #container_name: combine-python
+ #   depends_on:
+  #    - kafka
+   # networks:
+#      - flink-net
+ #   volumes:
+  #    - ./frontend:/app
+   # working_dir: /app
+    #command: python3 combine.py
+   # entrypoint: ["sh", "-c", "./wait-for-kafka.sh kafka:9092 && python3 frontend/combine.py"]
+
+  #main-job:
+  # build: 
+   # context: ./flink
+    # dockerfile: flink.Dockerfile
+   #container_name: main-job
+   #depends_on:
+   # - kafka
+   #networks:
+    #- flink-net
+   #volumes:
+    #- ./jars:/opt/flink/connectors
+    #- ./flink:/app
+   #working_dir: /app
+   #entrypoint: ["sh", "-c", "./wait-for-kafka.sh kafka:9092 && flink run -py main.py"]
+
+
+
+
+
+
+  #frontend-consumer:
+   # build: ./frontend
+    ##depends_on:
+    #- kafka
+    #- main-job
+    #networks:
+    #- flink-net
+    #volumes:
+    #- ./frontend:/app
+    #working_dir: /app
+    #entrypoint: ["sh", "-c", "./wait-for-kafka.sh kafka:9092 processed-data && python3 consumer.py"]
+
+  producer_combine:
+   build: ./frontend
+   container_name: producer_combine
+   depends_on:
+     - kafka
+   networks:
+     - flink-net
+   volumes:
+     - ./frontend:/app
+   working_dir: /app
+   command: python3 /app/combine.py
+
+  dashboard:
+      build:
+        context: ./frontend
+        dockerfile: Dockerfile
+        args:
+        # Pass the token into the build
+          MAPBOX_API_KEY: ${MAPBOX_API_KEY}
+      image: streamlit-dashboard:latest
+      container_name: streamlit-dashboard
+      depends_on:
+        - kafka
+      networks:
+        - flink-net
+      ports:
+        - "8501:8501"
+      volumes:
+        - ./frontend:/app
+      working_dir: /app
+      environment:
+      # Pass the token into the container at runtime
+        - MAPBOX_API_KEY=${MAPBOX_API_KEY}
+      command: >
+        streamlit run dashboard.py
+        --server.port=8501
+        --server.address=0.0.0.0
+
+
+networks:
+  flink-net:
+    driver: bridge
