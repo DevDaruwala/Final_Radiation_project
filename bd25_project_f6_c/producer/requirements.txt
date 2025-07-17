@@ -1,4 +1,0 @@
-kafka-python
-pycountry
-reverse_geocoder
-

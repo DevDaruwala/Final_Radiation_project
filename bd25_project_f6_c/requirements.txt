@@ -1,4 +1,0 @@
-apache-flink==1.18.1
-kafka-python==2.2.10
-pandas
-pyyaml
